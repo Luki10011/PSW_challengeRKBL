@@ -11,7 +11,7 @@ material aruco/aruco_5
       texture_unit
       {
         scale 1.0 1.0
-        texture ../textures/aruco_5.jpeg
+        texture ../textures/aruco_5_test.jpeg
         filtering anisotropic
         max_anisotropy 16
       }
