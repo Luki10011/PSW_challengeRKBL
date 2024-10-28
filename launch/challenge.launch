@@ -25,4 +25,8 @@
 
     <!-- Run challenge -->
     <node name="iris_node" pkg="psw_challenge" type="iris_node" args="20.0 2.0" output="screen"/>
+    <!-- Camera display -->
+    <node name="camera_view" pkg="psw_challenge" type="camera_view.py" required="true" output="screen"/>
+    <!-- Control node -->
+    <node name="position_control" pkg="psw_challenge" type="position_control.py" required="true" output="screen"/>
 </launch>
