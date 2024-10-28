@@ -2,7 +2,6 @@ import cv2
 import numpy as np
 
 
-
 def estimatePoseSingleMarkers(corners, marker_size, mtx, distortion):
     '''
     This will estimate the rvec and tvec for each of the marker corners detected by:
@@ -28,7 +27,7 @@ def estimatePoseSingleMarkers(corners, marker_size, mtx, distortion):
     return rvecs, tvecs, trash
 
 
-def pose_estimation(frame, aruco_dict_type, matrix_coefficients, distortion_coefficients):
+def estimate_spec_marker_pose(frame, aruco_dict_type, matrix_coefficients, distortion_coefficients, marker_size, expected_marker_id):
 
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     aruco_dict = cv2.aruco.getPredefinedDictionary(aruco_dict_type)
@@ -37,14 +36,22 @@ def pose_estimation(frame, aruco_dict_type, matrix_coefficients, distortion_coef
     detector = cv2.aruco.ArucoDetector(aruco_dict, parameters)
     corners, ids, rejected_img_points = detector.detectMarkers(gray)
 
-        
+    ret_rvec = None
+    ret_tvec = None
+
     if len(corners) > 0:
         for i in range(0, len(ids)):
 
-            rvec, tvec, markerPoints = estimatePoseSingleMarkers(corners[i], 0.1, matrix_coefficients,
+            rvec, tvec, markerPoints = estimatePoseSingleMarkers(corners[i], marker_size, matrix_coefficients,
                                                                        distortion_coefficients)
             
-            # Tu jeszcze można dodać jakąś wizualizację dla każdego z wykrytych punktów
+            # TODO: Tu jeszcze można dodać jakąś wizualizację dla każdego z wykrytych punktów
 
-    return rvec, tvec
+            if ids[i] == expected_marker_id:
+                ret_rvec = rvec
+                ret_tvec = tvec
+    
+
+            
+    return ret_rvec, ret_tvec, frame
 
