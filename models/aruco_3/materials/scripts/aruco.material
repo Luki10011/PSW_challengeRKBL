@@ -1,0 +1,20 @@
+material aruco/aruco_3
+{
+  receive_shadows on
+
+  technique
+  {
+    pass
+    {
+      ambient 1.0 1.0 1.0 1.0
+
+      texture_unit
+      {
+        scale 1.0 1.0
+        texture ../textures/aruco_3.jpeg
+        filtering anisotropic
+        max_anisotropy 16
+      }
+    }
+  }
+}

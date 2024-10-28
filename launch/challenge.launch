@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- Arguments -->
+    <arg name="uav_x0" default="-2"/>
+    <arg name="uav_y0" default="-2"/>
+
+    <!-- Run world -->
+    <arg name="vehicle" default="iris"/>
+    <arg name="sdf" default="$(find psw_challenge)/models/iris_fpv_cam/iris_fpv_cam.sdf"/>
+    <arg name="world" default="$(find psw_challenge)/worlds/static_landing.world"/>
+    <arg name="px4_dir" default="/root/PX4-Autopilot"/>
+
+    <include file="$(arg px4_dir)/launch/mavros_posix_sitl.launch">
+        <arg name="x" value="$(arg uav_x0)"/>
+        <arg name="y" value="$(arg uav_y0)"/>
+        <arg name="z" value="0.1"/>
+        <arg name="Y" value="0"/>
+        <arg name="respawn_gazebo" value="true"/>
+        <arg name="respawn_mavros" value="true"/>
+        <arg name="vehicle" value="$(arg vehicle)"/>
+        <arg name="sdf" value="$(arg sdf)"/>
+        <arg name="verbose" value="true"/>
+        <arg name="world" value="$(arg world)"/>
+    </include>
+
+    <!-- Run challenge -->
+    <node name="iris_node" pkg="psw_challenge" type="iris_node" args="20.0 2.0" output="screen"/>
+</launch>

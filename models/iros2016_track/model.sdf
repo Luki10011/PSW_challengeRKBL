@@ -1,0 +1,53 @@
+<?xml version='1.0'?>
+<sdf version='1.6'>
+  <model name='iROS2016 Track'>
+
+    <link name="gate_1">
+      <pose>3.0 -2.15 0  0 0 1.570796</pose>
+      <visual name="visual">
+        <geometry>
+          <mesh><uri>model://iros2016_track/gates/05.dae</uri></mesh>
+        </geometry>
+      </visual>
+    </link>
+
+    <link name="gate_2">
+      <pose>8.25 0.0 0  0 0 2.355</pose>
+      <visual name="visual">
+        <geometry>
+          <mesh><uri>model://iros2016_track/gates/05.dae</uri></mesh>
+        </geometry>
+      </visual>
+    </link>
+
+    <link name="gate_3">
+      <pose>12.5 0.3 0  0 0 1.570796</pose>
+      <visual name="visual">
+        <geometry>
+          <mesh><uri>model://iros2016_track/gates/05.dae</uri></mesh>
+        </geometry>
+      </visual>
+    </link>
+
+    <link name="gate_4">
+      <pose>16.0 -1.8 0  0 0 0.785</pose>
+      <visual name="visual">
+        <geometry>
+          <mesh><uri>model://iros2016_track/gates/05.dae</uri></mesh>
+        </geometry>
+      </visual>
+    </link>
+
+    <link name="gate_5">
+      <pose>16.3  -8.0  0 0 0.785</pose>
+      <visual name="visual">
+        <geometry>
+          <mesh><uri>model://iros2016_track/gates/05.dae</uri></mesh>
+        </geometry>
+      </visual>
+    </link>
+   
+    <static>1</static>
+    <allow_auto_disable>1</allow_auto_disable>
+  </model>
+</sdf>
