@@ -18,4 +18,4 @@ echo "Building psw_challenge with additional docker arguments $build_args."
 docker build \
     $build_args \
     -f .devcontainer/Dockerfile \
-    -t psw_challenge .
+    -t psw_challengerkbl .

@@ -3,12 +3,12 @@
 XSOCK=/tmp/.X11-unix
 XAUTH=/tmp/.docker.xauth
 SRC_LOCAL=${PWD}
-SRC_DOCKER=/root/sim_ws/src/psw_challenge
+SRC_DOCKER=/root/sim_ws/src/psw_challengeRKBL
 touch $XAUTH
 xauth nlist $DISPLAY | sed -e 's/^..../ffff/' | xauth -f $XAUTH nmerge -
 
 echo "Running Docker Container"
-CONTAINER_NAME=psw_challenge
+CONTAINER_NAME=psw_challengeRKBL
 
 # Get distro of the built image
 run_args=""
