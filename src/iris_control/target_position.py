@@ -120,7 +120,7 @@ def camera_sub_callback(msg: Image):
                 target_z = ???
 
                 # Obliczone wartości publikujemy jako PoseStamped w topicu target_topic
-                # TODO: chcemy zadawać też rotację? Po co?
+                # TODO: chcemy zadawać też rotację? Jaką i po co?
 
                 target_msg = PoseStamped()
                 target_msg.pose.position.x = target_x
