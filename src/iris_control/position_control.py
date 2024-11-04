@@ -9,7 +9,7 @@ import numpy as np
 
 GATE_HEIGHT = 1  # TODO
 GATE_WIDTH = 1  # TODO
-MARKER_SIZE = 0.1  # TODO
+MARKER_SIZE = 0.25  # TODO
 CAMERA_MATRIX = [[0, 0, 0], [0, 0, 0], [0, 0, 0]]  # TODO
 CAMERA_DISTORTION = [0, 0, 0, 0, 0]  # TODO
 NO_GATES = 5  # TODO: Sprawdzić
