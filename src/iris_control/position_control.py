@@ -49,6 +49,8 @@ def pose_cb(msg: PoseStamped):
                 challenge_stage = Stage.FLIGHT
 
         case Stage.FLIGHT:
+            pos_pub.publish(current_target)
+
             # Dron przeleciał przez bramkę
             if np.round(drone_pose.x, 1) == np.round(current_target.x, 1) and\
                np.round(drone_pose.y, 1) == np.round(current_target.y, 1) and\
@@ -70,20 +72,16 @@ def pose_cb(msg: PoseStamped):
                 gate_pub.publish(gate_msg)
                 challenge_stage = Stage.FINISH
 
-
         case Stage.FINISH:
             # Koniec trasy - lądowanie
             current_target.pose.position.z = 0
+            pos_pub.publish(current_target)
 
             # Koniec challengu
             challenge_started = False
             start_msg = Bool
             start_msg.data = challenge_started
             start_pub.publish(start_msg)
-        
-
-    pos_pub.publish(current_target)
-
 
 def start_challenge_cb(msg: Bool):
     global challenge_started

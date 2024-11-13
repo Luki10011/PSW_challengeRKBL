@@ -108,7 +108,7 @@ def camera_sub_callback(msg: Image):
                 print(str_position)
                 #print(str_attitude)
                 
-                drone_rotation = current_drone_pose.orientation
+                drone_rotation = current_drone_pose.orientation  # To jest w kwaterionie
                 drone_position = current_drone_pose.position
 
                 # TODO: Tutaj trzeba przeliczyć pos_camera na pozycję bezwględną w świecie za pomocą
