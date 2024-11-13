@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 import rospy
 from sensor_msgs.msg import Image
 import cv2
@@ -79,6 +79,7 @@ def camera_sub_callback(msg: Image):
     if len(corners) > 0:
         for corner, id in zip(corners, ids):
             if int(id) == next_gate:
+                corner = [corner]
                 ret= cv2.aruco.estimatePoseSingleMarkers(corner, .25, np.array(CAMERA_MATRIX),
                                                                             np.array(CAMERA_DISTORTION))  
                 rvec, tvec = ret[0][0,0,:], ret[1][0,0,:] 
@@ -105,8 +106,8 @@ def camera_sub_callback(msg: Image):
                 str_attitude = "CAMERA Attitude r=%4.0f  p=%4.0f  y=%4.0f"%(math.degrees(roll_camera),math.degrees(pitch_camera),
                                     math.degrees(yaw_camera))
                 cv2.putText(frame, str_attitude, (0, 250), font, 1, (0, 255, 0), 2, cv2.LINE_AA)
-                print(str_position)
-                #print(str_attitude)
+                # print(str_position)
+                # print(str_attitude)
                 
                 drone_rotation = current_drone_pose.orientation  # To jest w kwaterionie
                 drone_position = current_drone_pose.position
@@ -115,23 +116,45 @@ def camera_sub_callback(msg: Image):
                 # wektora obrotu drona (drone_rotation) względem świata - zrzutować pos_camera na osie świate
                 # i dodać pozycję drona, potem dodać jeszcze wymiary bramki na podstawie roll_camera, pitch_camera, yaw_camera
 
-                target_x = ???
-                target_y = ???
-                target_z = ???
+                rotated_pos_camera = np.matrix(cv2.Rodrigues(np.array([drone_rotation.x, drone_rotation.y, drone_rotation.z]))[0]) @ pos_camera
+                #rotated_pos_camera = quaternionRotation(drone_rotation) @ pos_camera
+                print(f"Drone: {drone_position.x}, {drone_position.y}, {drone_position.z}")
 
+                target_x = rotated_pos_camera[0] + drone_position.x
+                target_y = rotated_pos_camera[1] + drone_position.y
+                target_z = rotated_pos_camera[2] + drone_position.z
+
+                print(f"Absolute: {target_z}, {target_y}, {target_x}")
                 # Obliczone wartości publikujemy jako PoseStamped w topicu target_topic
                 # TODO: chcemy zadawać też rotację? Jaką i po co?
 
                 target_msg = PoseStamped()
-                target_msg.pose.position.x = target_x
-                target_msg.pose.position.y = target_y
-                target_msg.pose.position.z = target_z
+                target_msg.pose.position.z = -target_y
+                target_msg.pose.position.y = target_x
+                target_msg.pose.position.x = target_z
 
-                target_pub.publish()
+                target_pub.publish(target_msg)
 
     cv2.imshow("test", gray_frame)
     cv2.waitKey(1)
 
+
+def quaternionRotation(q0123):
+    q0 = q0123.w
+    q1 = q0123.x
+    q2 = q0123.y
+    q3 = q0123.z
+
+    q0s = q0**2
+    q1s = q1**2
+    q2s = q2**2
+    q3s = q3**2
+
+    R = np.array([[q0s + q1s -q2s -q3s, 2*(q1*q2 + q0*q3), 2*(q1*q3 - q0*q2)],
+                  [2*(q1*q2 - q0*q3), q0s - q1s + q2s -q3s, 2*(q0*q1 + q2*q3)],
+                  [2*(q0*q2 + q1*q3), 2*(q2*q3 - q0*q1), q0s - q1s -q2s +q3s]])
+    
+    return R
 
 def pose_sub_callback(msg: PoseStamped):
     global current_drone_pose
