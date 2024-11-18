@@ -51,9 +51,10 @@ def pose_cb(msg: PoseStamped):
         pos_pub.publish(current_target)
 
         # Dron przeleciał przez bramkę
-        if np.round(drone_pose.x, 1) == np.round(current_target.pose.position.x, 1) and\
-            np.round(drone_pose.y, 1) == np.round(current_target.pose.position.y, 1) and\
-            np.round(drone_pose.z, 1) == np.round(current_target.pose.position.z, 1):
+        # if np.round(drone_pose.x, 1) == np.round(current_target.pose.position.x, 1) and\
+        #     np.round(drone_pose.y, 1) == np.round(current_target.pose.position.y, 1) and\
+        #     np.round(drone_pose.z, 1) == np.round(current_target.pose.position.z, 1):
+        if np.linalg.norm(np.array([drone_pose.x, drone_pose.y, drone_pose.z]) - np.array([current_target.pose.position.x, current_target.pose.position.y, current_target.pose.position.z])) < 3:
             challenge_stage = Stage.IN_TARGET
         
         print(f"FLIGHT: {current_target.pose.position.x}, {current_target.pose.position.y}, {current_target.pose.position.z}")

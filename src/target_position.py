@@ -4,7 +4,7 @@ from sensor_msgs.msg import Image
 import cv2
 import numpy as np
 import sys, time, math
-from geometry_msgs.msg import PoseStamped, Pose
+from geometry_msgs.msg import PoseStamped, Pose, Twist
 from std_msgs.msg import UInt8
 
 
@@ -22,11 +22,16 @@ target_topic = "/iris/target_pose"
 pose_sub_topic = "/mavros/local_position/pose"
 gate_sub_topic = "/iris/next_gate"
 camera_sub_topic = '/iris/usb_cam/image_raw'
+cmd_vel_topic = "/iris_control/cmd_vel"
+velocity_sub_topic = "/mavros/local_position/velocity_local"
 
 target_pub = rospy.Publisher(target_topic, PoseStamped, queue_size=10)
 
 next_gate = 1
 current_drone_pose = Pose()
+current_drone_vel = Twist()
+
+vel_pub = rospy.Publisher(cmd_vel_topic, Twist, queue_size=10)
 
 
 def isRotationMatrix(R):
@@ -116,34 +121,69 @@ def camera_sub_callback(msg: Image):
                 # wektora obrotu drona (drone_rotation) względem świata - zrzutować pos_camera na osie świate
                 # i dodać pozycję drona, potem dodać jeszcze wymiary bramki na podstawie roll_camera, pitch_camera, yaw_camera
 
-                rotated_pos_camera = np.matrix(cv2.Rodrigues(np.array([drone_rotation.x, drone_rotation.y, drone_rotation.z]))[0]) @ pos_camera
-                #rotated_pos_camera = quaternionRotation(drone_rotation) @ pos_camera
-                print(f"Drone: {drone_position.x}, {drone_position.y}, {drone_position.z}")
+                # rotated_pos_camera = np.matrix(cv2.Rodrigues(np.array([drone_rotation.x, drone_rotation.y, drone_rotation.z]))[0]) @ tvec.T
+                rotated_pos_camera = quaternionRotation([drone_rotation.w, drone_rotation.x, drone_rotation.y, drone_rotation.z]) @ tvec
+                # print(f"Drone: {drone_position.x}, {drone_position.y}, {drone_position.z}")
 
-                target_x = rotated_pos_camera[0] + drone_position.x
-                target_y = rotated_pos_camera[1] + drone_position.y
-                target_z = rotated_pos_camera[2] + drone_position.z
+                # Mamy położenie względne, i musimy odpowiednio zasterować prędością
 
-                print(f"Absolute: {target_z}, {target_y}, {target_x}")
+                target_x = rotated_pos_camera[0] #+ drone_position.x
+                target_y = rotated_pos_camera[1] #+ drone_position.y
+                target_z = rotated_pos_camera[2] #+ drone_position.z
+
+
+                desired_vel = np.zeros((3, 1))
+
+                
+
+                print(f"Absolute: {target_x}, {target_y}, {target_z}")
+                
                 # Obliczone wartości publikujemy jako PoseStamped w topicu target_topic
                 # TODO: chcemy zadawać też rotację? Jaką i po co?
 
                 target_msg = PoseStamped()
-                target_msg.pose.position.z = -target_y
-                target_msg.pose.position.y = target_x
-                target_msg.pose.position.x = target_z
+                # target_msg.pose.position.z = -target_y
+                # target_msg.pose.position.y = target_x
+                # target_msg.pose.position.x = target_z
+
+                gate_offset = np.array([0, -GATE_WIDTH/2, GATE_HEIGHT/2])
+                rotated_gate_offset = R_ct @ gate_offset
+        
+                xRoute = target_z + rotated_gate_offset[0,0]
+                yRoute = -(target_x - rotated_gate_offset[0,1])
+                zRoute = -(target_y + rotated_gate_offset[0,2])
+
+
+                desired_vel[0] = (xRoute)/2  # Nasz X
+                desired_vel[1] = (yRoute)/2  # Nasz Y
+                desired_vel[2] = (zRoute)/2  # Nasz Z
+                # print(f"Absolute: {desired_vel[0]}, {desired_vel[1]}, {desired_vel[2]}")
+                # if np.sum(np.abs(np.array([current_drone_vel.linear.x, current_drone_vel.linear.y, current_drone_vel.linear.z]))) > 2:
+                #     esired_vel = current_drone_vel / np.linalg.norm(current_drone_vel)
+
+                dt = 0.5
+
+                print(f"Offset: {rotated_gate_offset[0,0]}, {rotated_gate_offset[0,1]}, {rotated_gate_offset[0,2]}")
+
+                target_msg = PoseStamped()
+                target_msg.pose.position.z = drone_position.z + dt*desired_vel[2]
+                target_msg.pose.position.y = drone_position.y + dt*desired_vel[1] 
+                target_msg.pose.position.x = drone_position.x + dt*desired_vel[0] 
 
                 target_pub.publish(target_msg)
+
+                
+                
 
     cv2.imshow("test", gray_frame)
     cv2.waitKey(1)
 
 
 def quaternionRotation(q0123):
-    q0 = q0123.w
-    q1 = q0123.x
-    q2 = q0123.y
-    q3 = q0123.z
+    q0 = q0123[0]
+    q1 = q0123[1]
+    q2 = q0123[2]
+    q3 = q0123[3]
 
     q0s = q0**2
     q1s = q1**2
@@ -165,12 +205,17 @@ def gate_sub_callback(msg: UInt8):
     global next_gate
     next_gate = msg.data
 
+def velocity_callback(msg: Twist):
+    global current_drone_vel
+    current_drone_vel = msg
+
 
 def camera_sub():
     rospy.init_node("listener", anonymous=True)
     rospy.Subscriber(camera_sub_topic, Image, camera_sub_callback)
     rospy.Subscriber(pose_sub_topic, PoseStamped, pose_sub_callback)
     rospy.Subscriber(gate_sub_topic, UInt8, gate_sub_callback)
+    rospy.Subscriber(cmd_vel_topic, Twist, velocity_callback)
     rospy.spin()
 
 
