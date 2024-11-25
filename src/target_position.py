@@ -5,8 +5,16 @@ import cv2
 import numpy as np
 import sys, time, math
 from geometry_msgs.msg import PoseStamped, Pose, Twist, Quaternion
+from cv_bridge import CvBridge, CvBridgeError
 from std_msgs.msg import UInt8
+from utils.utils import regulator_PD, calculate_area
+from collections import deque
 
+FONT_OF_TEXT = cv2.FONT_HERSHEY_PLAIN
+MARKER_DICT = cv2.aruco.Dictionary_get(cv2.aruco.DICT_4X4_50)
+PARAM_MARKERS  = cv2.aruco.DetectorParameters_create()
+
+BRIDGE = CvBridge()
 
 GATE_HEIGHT = 1  # TODO
 GATE_WIDTH = 1  # TODO
@@ -16,6 +24,13 @@ CAMERA_MATRIX = np.array([[640.5098521801531, 0.0, 640.5],
                               [0.0, 0.0, 1.0]])
 CAMERA_DISTORTION = np.array([0, 0, 0, 0, 0]).astype(float)
 
+gates = {
+    1: None,
+    2: None,
+    3: None,
+    4: None,
+    5: None
+}
 
 target_topic = "/iris/target_pose"
 
@@ -29,250 +44,114 @@ detect_gate_topic = "/iris/detected_gate"
 target_pub = rospy.Publisher(target_topic, PoseStamped, queue_size=10)
 
 next_gate = 1
-current_drone_pose = Pose()
+# current_drone_pose = Pose()
 current_drone_vel = Twist()
 
 vel_pub = rospy.Publisher(cmd_vel_topic, Twist, queue_size=10)
 detect_gate_pub = rospy.Publisher(detect_gate_topic, UInt8, queue_size=10)
 
-prev_target = PoseStamped()
+frame_cnt = 0
+frame_cnt_flag = False
+FRAME_CNT_THRESH = 10
+aruco_area_flag = False
+ARUCO_AREA_THRESH = 2000
 
-def isRotationMatrix(R):
-    Rt = np.transpose(R)
-    shouldBeIdentity = np.dot(Rt, R)
-    I = np.identity(3, dtype=R.dtype)
-    n = np.linalg.norm(I - shouldBeIdentity)
-    return n < 1e-6
+QUEUE_LEN = 5
+queue_col = deque(np.zeros(shape=(0),dtype=np.int16),maxlen=QUEUE_LEN)
+queue_row = deque(np.zeros(shape=(0),dtype=np.int16),maxlen=QUEUE_LEN)
 
-
-def rotationMatrixToEulerAngles(R):
-    assert (isRotationMatrix(R))
-
-    sy = math.sqrt(R[0, 0] * R[0, 0] + R[1, 0] * R[1, 0])
-
-    singular = sy < 1e-6
-
-    if not singular:
-        x = math.atan2(R[2, 1], R[2, 2])
-        y = math.atan2(-R[2, 0], sy)
-        z = math.atan2(R[1, 0], R[0, 0])
-    else:
-        x = math.atan2(-R[1, 2], R[1, 1])
-        y = math.atan2(-R[2, 0], sy)
-        z = 0
-
-    return np.array([x, y, z])
-
+reg_err = np.zeros(shape=(10,))
 
 def camera_sub_callback(msg: Image):
-    global prev_target
-    frame = np.array(list(msg.data)).astype(np.uint8)
-    frame = np.reshape(frame, (msg.height, msg.width, 3))
-    # frame = np.where()
-
+    global frame_cnt, next_gate 
+    global frame_cnt_flag, aruco_area_flag, was_next_gate_in
+    global reg_err
+    frame = BRIDGE.imgmsg_to_cv2(msg,"passthrough")
     gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    marker_dict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_4X4_50)
-    param_markers  = cv2.aruco.DetectorParameters_create()
 
     corners, ids, reject = cv2.aruco.detectMarkers(
-        gray_frame, marker_dict, parameters = param_markers, cameraMatrix=CAMERA_MATRIX,
+        gray_frame, MARKER_DICT, 
+        parameters = PARAM_MARKERS, 
+        cameraMatrix=CAMERA_MATRIX,
         distCoeff=CAMERA_DISTORTION
     )
-    R_flip  = np.zeros((3,3), dtype=np.float32)
-    R_flip[0,0] = 1.0
-    R_flip[1,1] =-1.0
-    R_flip[2,2] =-1.0
-    # print(marker_corners)
-    # corner1, corner2, corner3, corner4 = [marker[i][0] for i, marker in enumerate(marker_corners)]
 
     print(f"Current gate = {next_gate} | Found gates = {ids}")
-
-    det_gate_msg = UInt8()
-    det_gate_msg.data = np.array(sorted(el[0] for el in ids)[0]).astype(np.uint8) if ids is not None else 0
-    detect_gate_pub.publish(det_gate_msg)
-
     
-    
-    font = cv2.FONT_HERSHEY_PLAIN
-    if len(corners) > 0:
+    if len(corners) > 0: 
+        was_next_gate_in = False
         for corner, id in zip(corners, ids):
-            if int(id) == next_gate:
-                corner = [corner]
-                ret= cv2.aruco.estimatePoseSingleMarkers(corner, .25, np.array(CAMERA_MATRIX),
-                                                                            np.array(CAMERA_DISTORTION))  
-                rvec, tvec = ret[0][0,0,:], ret[1][0,0,:] 
+            id = int(id)
+            corner = [corner]
+            ret= cv2.aruco.estimatePoseSingleMarkers(corner, .25, CAMERA_MATRIX, CAMERA_DISTORTION)  
+            rvec, tvec = ret[0][0,0,:], ret[1][0,0,:]
+            aruco_center = np.zeros(shape=(3,1))
+            aruco_center[0] -= 1 
+            aruco_center[1] += 1
+            
+            goal_center, _____ = cv2.projectPoints(aruco_center, rvec, tvec, CAMERA_MATRIX,CAMERA_DISTORTION)
+            goal_center = (int(goal_center[0][0][0]), int(goal_center[0][0][1]))
+
+            if id == next_gate:
+                was_next_gate_in = True
+
+                queue_col.append(goal_center[0])
+                queue_row.append(goal_center[1])
+                col_mean = np.mean(queue_col,dtype="int16")
+                row_mean = np.mean(queue_row,dtype="int16")
+
+                gates[id] = (col_mean, row_mean)
+                aruco_area_flag = calculate_area(corner[0][0]) > ARUCO_AREA_THRESH
+
+                cv2.circle(gray_frame, (col_mean, row_mean), 5, (0,255,0),-1)
                 cv2.aruco.drawDetectedMarkers(gray_frame, corner)
                 cv2.aruco.drawAxis(gray_frame, CAMERA_MATRIX, CAMERA_DISTORTION, rvec, tvec, 0.25)
-                str_position = "MARKER Position x=%4.0f  y=%4.0f  z=%4.0f"%(tvec[0], tvec[1], tvec[2])
-                # cv2.putText(gray_frame, str_position, (0, 100), font, 1, (0, 255, 0), 2, cv2.LINE_AA)
-                cv2.putText(gray_frame, f"{id}", (10, 120), font, 4, (0, 255, 0), 2, cv2.LINE_AA)
-                R_ct    = np.matrix(cv2.Rodrigues(rvec)[0])
-                R_tc    = R_ct.T
-                #Get the attitude in terms of euler 321 (Needs to be flipped first)
-                roll_marker, pitch_marker, yaw_marker = rotationMatrixToEulerAngles(R_flip*R_tc)
+                cv2.putText(gray_frame, f"{id}", (10, 120), FONT_OF_TEXT, 4, (0, 255, 0), 2, cv2.LINE_AA)
 
-                #-- Print the marker's attitude respect to camera frame
-                str_attitude = "MARKER Attitude r=%4.0f  p=%4.0f  y=%4.0f"%(math.degrees(roll_marker),math.degrees(pitch_marker),
-                                    math.degrees(yaw_marker))
-                cv2.putText(frame, str_attitude, (0, 150), font, 1, (0, 255, 0), 2, cv2.LINE_AA)
-                pos_camera = -R_tc*np.matrix(tvec).T
+            else:
+                cv2.circle(gray_frame, goal_center, 5, (0,255,0),-1)
+                gates[id] = goal_center
 
-                str_position = "CAMERA Position x=%4.0f  y=%4.0f  z=%4.0f"%(pos_camera[0], pos_camera[1], pos_camera[2])
-                cv2.putText(frame, str_position, (0, 200), font, 1, (0, 255, 0), 2, cv2.LINE_AA)
-
-                #-- Get the attitude of the camera respect to the frame
-                roll_camera, pitch_camera, yaw_camera = rotationMatrixToEulerAngles(R_flip*R_tc)
-                str_attitude = "CAMERA Attitude r=%4.0f  p=%4.0f  y=%4.0f"%(math.degrees(roll_camera),math.degrees(pitch_camera),
-                                    math.degrees(yaw_camera))
-                cv2.putText(frame, str_attitude, (0, 250), font, 1, (0, 255, 0), 2, cv2.LINE_AA)
-                # print(str_position)
-                # print(str_attitude)
-                
-                drone_rotation = current_drone_pose.orientation  # To jest w kwaterionie
-                drone_position = current_drone_pose.position
-
-                # TODO: Tutaj trzeba przeliczyć pos_camera na pozycję bezwględną w świecie za pomocą
-                # wektora obrotu drona (drone_rotation) względem świata - zrzutować pos_camera na osie świate
-                # i dodać pozycję drona, potem dodać jeszcze wymiary bramki na podstawie roll_camera, pitch_camera, yaw_camera
-
-                # rotated_pos_camera = np.matrix(cv2.Rodrigues(np.array([drone_rotation.x, drone_rotation.y, drone_rotation.z]))[0]) @ tvec.T
-                rotated_pos_camera = quaternionRotation([drone_rotation.w, drone_rotation.x, drone_rotation.y, drone_rotation.z]) @ tvec
-                # print(f"Drone: {drone_position.x}, {drone_position.y}, {drone_position.z}")
-
-                # Mamy położenie względne, i musimy odpowiednio zasterować prędością
-
-                target_x = rotated_pos_camera[0] #+ drone_position.x
-                target_y = rotated_pos_camera[1] #+ drone_position.y
-                target_z = rotated_pos_camera[2] #+ drone_position.z
-
-
-                desired_vel = np.zeros((3, 1))
-
-                
-
-                # print(f"Absolute: {target_x}, {target_y}, {target_z}")
-                
-                # Obliczone wartości publikujemy jako PoseStamped w topicu target_topic
-                # TODO: chcemy zadawać też rotację? Jaką i po co?
-
-                target_msg = PoseStamped()
-                # target_msg.pose.position.z = -target_y
-                # target_msg.pose.position.y = target_x
-                # target_msg.pose.position.x = target_z
-
-                gate_offset = np.array([0, -GATE_WIDTH/2, GATE_HEIGHT/2])
-                rotated_gate_offset = R_ct @ gate_offset
-        
-                xRoute = target_z + rotated_gate_offset[0,0]
-                yRoute = -(target_x - rotated_gate_offset[0,1])
-                zRoute = -(target_y + rotated_gate_offset[0,2])
-
-
-                desired_vel[0] = (xRoute)/2  # Nasz X
-                desired_vel[1] = (yRoute)/2  # Nasz Y
-                desired_vel[2] = (zRoute)/2  # Nasz Z
-                # print(f"Absolute: {desired_vel[0]}, {desired_vel[1]}, {desired_vel[2]}")
-                # if np.sum(np.abs(np.array([current_drone_vel.linear.x, current_drone_vel.linear.y, current_drone_vel.linear.z]))) > 2:
-                #     esired_vel = current_drone_vel / np.linalg.norm(current_drone_vel)
-
-                dt = 0.5
-
-                # print(f"Offset: {rotated_gate_offset[0,0]}, {rotated_gate_offset[0,1]}, {rotated_gate_offset[0,2]}")
-
-                camera_rot_quaterion = yaw_to_quaternion(np.radians(yaw_camera))
-                target_rot_quaterion = multiply_quaternions(normalize_quaternion(camera_rot_quaterion),
-                                                            normalize_quaternion([drone_rotation.w, drone_rotation.x, drone_rotation.y, drone_rotation.z]))
-
-                target_msg = PoseStamped()
-                target_msg.pose.position.z = drone_position.z + dt*desired_vel[2]
-                target_msg.pose.position.y = drone_position.y + dt*desired_vel[1] 
-                target_msg.pose.position.x = drone_position.x + dt*desired_vel[0]
-                target_msg.pose.orientation.w = target_rot_quaterion[0]
-                target_msg.pose.orientation.x = target_rot_quaterion[1]
-                target_msg.pose.orientation.y = target_rot_quaterion[2]
-                target_msg.pose.orientation.z = target_rot_quaterion[3]
-
-                prev_target = target_msg
-
-                print(f"id: {id}, pose: {target_msg.pose.position.x}, {target_msg.pose.position.y}, {target_msg.pose.position.z}")
-
-                target_pub.publish(target_msg)
+    if frame_cnt_flag and aruco_area_flag:
+        next_gate += 1
+        frame_cnt_flag = False 
+        aruco_area_flag = False
+        queue_col.clear()
+        queue_row.clear()
+    elif not was_next_gate_in:
+        frame_cnt += 1
+        if frame_cnt > FRAME_CNT_THRESH:
+            frame_cnt_flag = True
     else:
-        target_msg = prev_target
-        # target_msg.pose.position.z *= 1.1  
-        # target_msg.pose.position.y *= 1.3  
-        # target_msg.pose.position.x *= 1.3  
-        target_pub.publish(target_msg)
-    
-                
+        # def regulator_PD(Kp,Kd,val,val_prev=0,setpoint=620,saturation=0.5):
+        vel_msg = Twist()
+        z_val, y_val = gates[next_gate]
+        Kp_z = 0.001
+        Kd_z = 0.5
+        Kp_y = 0.01
+        Kd_y = 0.0001
+        vel_msg.linear.x = 0.5
 
+        vel_msg.angular.z, reg_err[0] = regulator_PD(Kp_z, Kd_z,
+                                          val = z_val, val_prev = reg_err[0],
+                                          setpoint = 620, saturation = 10 )
+        vel_msg.angular.y, reg_err[1] = regulator_PD(Kp_y, Kd_y,
+                                          val = y_val, val_prev = reg_err[1],
+                                          setpoint = 360, saturation = 10 )
+        vel_pub.publish(vel_msg)
+        print(f"vel.ang z == {vel_msg.angular.z} \nvel.ang y == {vel_msg.angular.y}")
+        print(f"error z == {reg_err[0]} \nerror y == {reg_err[1]}")
+
+
+    cv2.circle(gray_frame, (640,360) , 5, (0,255,0),1)
     cv2.imshow("test", gray_frame)
     cv2.waitKey(1)
-
-def normalize_quaternion(q):
-    """
-    Normalizuje kwaternion.
-    """
-    norm = math.sqrt(sum(i ** 2 for i in q))
-    return [i / norm for i in q]
-
-
-def multiply_quaternions(q1, q2):
-    """
-    Mnoży dwa kwaterniony q1 i q2.
-    
-    Kwaterniony powinny być w formacie [w, x, y, z], 
-    gdzie w to część skalarna, a x, y, z to części wektorowe.
-    """
-    w1, x1, y1, z1 = q1
-    w2, x2, y2, z2 = q2
-
-    # Obliczenia zgodnie z regułami mnożenia kwaternionów
-    w_result = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
-    x_result = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
-    y_result = w1 * y2 + y1 * w2 + z1 * x2 - x1 * z2
-    z_result = w1 * z2 + z1 * w2 + x1 * y2 - y1 * x2
-
-    return np.array([w_result, x_result, y_result, z_result])
-
-
-def yaw_to_quaternion(yaw):
-    """
-    Konwertuje kąt yaw (w radianach) na kwaternion.
-    """
-    w = math.cos(yaw / 2)
-    x = 0
-    y = 0
-    z = math.sin(yaw / 2)
-    return [w, x, y, z]
-
-
-
-def quaternionRotation(q0123):
-    q0 = q0123[0]
-    q1 = q0123[1]
-    q2 = q0123[2]
-    q3 = q0123[3]
-
-    q0s = q0**2
-    q1s = q1**2
-    q2s = q2**2
-    q3s = q3**2
-
-    R = np.array([[q0s + q1s -q2s -q3s, 2*(q1*q2 + q0*q3), 2*(q1*q3 - q0*q2)],
-                  [2*(q1*q2 - q0*q3), q0s - q1s + q2s -q3s, 2*(q0*q1 + q2*q3)],
-                  [2*(q0*q2 + q1*q3), 2*(q2*q3 - q0*q1), q0s - q1s -q2s +q3s]])
-    
-    return R
-
-def pose_sub_callback(msg: PoseStamped):
-    global current_drone_pose
-    current_drone_pose = msg.pose
 
 
 def gate_sub_callback(msg: UInt8):
     global next_gate
     next_gate = msg.data
+
 
 def velocity_callback(msg: Twist):
     global current_drone_vel
@@ -282,7 +161,6 @@ def velocity_callback(msg: Twist):
 def camera_sub():
     rospy.init_node("listener", anonymous=True)
     rospy.Subscriber(camera_sub_topic, Image, camera_sub_callback)
-    rospy.Subscriber(pose_sub_topic, PoseStamped, pose_sub_callback)
     rospy.Subscriber(gate_sub_topic, UInt8, gate_sub_callback)
     rospy.Subscriber(cmd_vel_topic, Twist, velocity_callback)
     rospy.spin()
