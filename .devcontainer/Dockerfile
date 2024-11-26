@@ -46,7 +46,7 @@ RUN apt-get update && apt-get install -y \
     ros-noetic-rqt-console 
 
 # Copy ROS package
-WORKDIR $HOME/$CATKIN_WORKSPACE/src/psw_challenge_rklb
+WORKDIR $HOME/$CATKIN_WORKSPACE/src/psw_challenge
 COPY . .
 
 # Build workspace
