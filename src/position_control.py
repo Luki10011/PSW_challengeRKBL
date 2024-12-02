@@ -15,6 +15,7 @@ pos_pub_topic = "/mavros/setpoint_position/local"
 gate_pub_topic = "/iris/next_gate"
 detect_gate_topic = "/iris/detected_gate"
 
+
 pos_sub_topic = "/mavros/local_position/pose"
 target_sub_topic = "/iris/target_pose"
 

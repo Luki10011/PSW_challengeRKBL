@@ -94,20 +94,20 @@ def calculate_area(corners):
     return area
 
 
-def regulator_PD(Kp,Kd,val,val_prev= 0, setpoint=620,saturation=0.5) -> Tuple[float, float]:
+def regulator_PD(Kp,Kd,val,e_prev= 0, setpoint=640,saturation=0.5) -> Tuple[float, float]:
     # Value of offset - when the error is equal zero
-    offset = 0
+    offset = 1e-9
     
     # PID calculations
     e = setpoint - val
     
     P = Kp*e
-    D = Kd*(e - val_prev)
+    D = Kd*(e - e_prev)
 
     # calculate manipulated variable - MV 
     MV = offset + P + D
     
     # update stored data for next iteration
-    val_prev = e
+    e_prev = e
 
-    return MV if abs(MV) <= saturation else float(np.sign(MV)*saturation), val_prev
+    return MV if abs(MV) <= saturation else float(np.sign(MV)*saturation), e_prev

@@ -28,6 +28,6 @@
     <!-- Camera display -->
     <node name="target_position" pkg="psw_challenge" type="target_position.py" required="true" output="screen"/>
     <!-- Control node -->
-    <node name="position_control" pkg="psw_challenge" type="position_control.py" required="true" output="screen"/>
+    <!-- <node name="position_control" pkg="psw_challenge" type="position_control.py" required="true" output="screen"/> -->
 </launch>
 

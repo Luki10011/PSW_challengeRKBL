@@ -6,7 +6,8 @@ import numpy as np
 import sys, time, math
 from geometry_msgs.msg import PoseStamped, Pose, Twist, Quaternion
 from cv_bridge import CvBridge, CvBridgeError
-from std_msgs.msg import UInt8
+from mavros_msgs.msg import PositionTarget
+from std_msgs.msg import UInt8, Bool
 from utils.utils import regulator_PD, calculate_area
 from collections import deque
 
@@ -33,39 +34,51 @@ gates = {
 }
 
 target_topic = "/iris/target_pose"
-
+start_topic = "/iris_control/challenge_start"
 pose_sub_topic = "/mavros/local_position/pose"
 gate_sub_topic = "/iris/next_gate"
 camera_sub_topic = '/iris/usb_cam/image_raw'
-cmd_vel_topic = "/iris_control/cmd_vel"
+# cmd_vel_topic = "/iris_control/cmd_vel"
+cmd_vel_topic = "/mavros/setpoint_raw/local"
 velocity_sub_topic = "/mavros/local_position/velocity_local"
 detect_gate_topic = "/iris/detected_gate"
+pos_sub_topic = "/mavros/local_position/pose"
+
 
 target_pub = rospy.Publisher(target_topic, PoseStamped, queue_size=10)
 
 next_gate = 1
 # current_drone_pose = Pose()
 current_drone_vel = Twist()
+drone_position = PoseStamped()
 
-vel_pub = rospy.Publisher(cmd_vel_topic, Twist, queue_size=10)
+start_pub = rospy.Publisher(start_topic, Bool, queue_size=10)
+vel_pub = rospy.Publisher(cmd_vel_topic, PositionTarget, queue_size=10)
 detect_gate_pub = rospy.Publisher(detect_gate_topic, UInt8, queue_size=10)
 
 frame_cnt = 0
 frame_cnt_flag = False
-FRAME_CNT_THRESH = 10
+FRAME_CNT_THRESH = 100
 aruco_area_flag = False
-ARUCO_AREA_THRESH = 2000
+ARUCO_AREA_THRESH = 2500
 
 QUEUE_LEN = 5
 queue_col = deque(np.zeros(shape=(0),dtype=np.int16),maxlen=QUEUE_LEN)
 queue_row = deque(np.zeros(shape=(0),dtype=np.int16),maxlen=QUEUE_LEN)
 
 reg_err = np.zeros(shape=(10,))
+challenge_started = False
+
+def start_challenge_cb(msg: Bool):
+    print("Sprawdzam")
+    global challenge_started
+    if msg.data:
+        challenge_started = True
 
 def camera_sub_callback(msg: Image):
     global frame_cnt, next_gate 
     global frame_cnt_flag, aruco_area_flag, was_next_gate_in
-    global reg_err
+    global reg_err, drone_position 
     frame = BRIDGE.imgmsg_to_cv2(msg,"passthrough")
     gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
@@ -112,7 +125,7 @@ def camera_sub_callback(msg: Image):
                 cv2.circle(gray_frame, goal_center, 5, (0,255,0),-1)
                 gates[id] = goal_center
 
-    if frame_cnt_flag and aruco_area_flag:
+    if frame_cnt_flag:
         next_gate += 1
         frame_cnt_flag = False 
         aruco_area_flag = False
@@ -122,25 +135,54 @@ def camera_sub_callback(msg: Image):
         frame_cnt += 1
         if frame_cnt > FRAME_CNT_THRESH:
             frame_cnt_flag = True
-    else:
+            frame_cnt = 0
+        
+    if challenge_started:
         # def regulator_PD(Kp,Kd,val,val_prev=0,setpoint=620,saturation=0.5):
-        vel_msg = Twist()
+        vel_msg = PositionTarget()
+        vel_msg.coordinate_frame = PositionTarget.FRAME_LOCAL_NED
+
         z_val, y_val = gates[next_gate]
         Kp_z = 0.001
-        Kd_z = 0.5
+        Kd_z = 0
         Kp_y = 0.01
-        Kd_y = 0.0001
-        vel_msg.linear.x = 0.5
+        Kd_y = 0
+        upper_bits_set_on = 0b1111000000000000
+        vel_msg.type_mask = not (PositionTarget.IGNORE_VX \
+        | PositionTarget.IGNORE_VY \
+        | PositionTarget.IGNORE_VZ \
+        | PositionTarget.IGNORE_YAW_RATE | upper_bits_set_on)
+        vel_msg.velocity.x = 2
+        # vel_msg.velocity.y = vel_msg.velocity.y 
+        # vel_msg.velocity.z = vel_msg.velocity.z
+        vel_msg.position.z = 2.5
+        # vel_msg.linear.y = 0
+        # vel_msg.linear.z = 0
 
-        vel_msg.angular.z, reg_err[0] = regulator_PD(Kp_z, Kd_z,
-                                          val = z_val, val_prev = reg_err[0],
-                                          setpoint = 620, saturation = 10 )
-        vel_msg.angular.y, reg_err[1] = regulator_PD(Kp_y, Kd_y,
-                                          val = y_val, val_prev = reg_err[1],
-                                          setpoint = 360, saturation = 10 )
+        # vel_msg.linear.y, reg_err[0] = regulator_PD(Kp_z, Kd_z,
+        #                                   val = z_val, e_prev = reg_err[0],
+        #                                   setpoint = 640, saturation = 10 )
+        # vel_msg.linear.z, reg_err[1] = regulator_PD(Kp_y, Kd_y,
+        #                                   val = y_val, e_prev = reg_err[1],
+        #                                   setpoint = 360, saturation = 10 )
+        
+        # linear_vel_vector = 
+
+        vel_msg.yaw_rate, reg_err[2] = regulator_PD(Kp_z, Kd_z,
+                                        val = z_val, e_prev = reg_err[2],
+                                        setpoint = 640, saturation = 10)
+        
+        
+        # vel_msg.linear.y = (reg_err[2])/100 if  (reg_err[2])/100 <= 0.6 else 0.6
+        # vel_msg.linear.z, reg_err[3] = regulator_PD(Kp_y, 0, y_val, e_prev = reg_err[3],
+        #                                 setpoint = 360, saturation = 6)
+        # vel_msg.angular.x = -10*vel_msg.angular.z
+        # vel_msg.angular.x = -10*vel_msg.angular.z
         vel_pub.publish(vel_msg)
-        print(f"vel.ang z == {vel_msg.angular.z} \nvel.ang y == {vel_msg.angular.y}")
-        print(f"error z == {reg_err[0]} \nerror y == {reg_err[1]}")
+        #print(f"{gates}")
+        print(f"vel.x == {vel_msg.velocity.x} \n")
+        # print(f"vel.lin z == {vel_msg.linear.z} \nvel.lin.y == {vel_msg.linear.y}")
+        # print(f"error y == {reg_err[2]} \nerror z == {reg_err[3]}")
 
 
     cv2.circle(gray_frame, (640,360) , 5, (0,255,0),1)
@@ -157,12 +199,19 @@ def velocity_callback(msg: Twist):
     global current_drone_vel
     current_drone_vel = msg
 
+def pose_callback(msg: PoseStamped):
+    global drone_position
+    drone_position = msg
+
 
 def camera_sub():
     rospy.init_node("listener", anonymous=True)
+    rospy.Subscriber(start_topic, Bool, start_challenge_cb)
     rospy.Subscriber(camera_sub_topic, Image, camera_sub_callback)
     rospy.Subscriber(gate_sub_topic, UInt8, gate_sub_callback)
     rospy.Subscriber(cmd_vel_topic, Twist, velocity_callback)
+    rospy.Subscriber(pos_sub_topic, PoseStamped, pose_callback)
+
     rospy.spin()
 
 
